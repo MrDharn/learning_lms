@@ -1,0 +1,179 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum LessonTier {
+  FULL
+  SCHOLARSHIP
+  BOTH
+}
+
+model User {
+  id                      String   @id @default(uuid())
+  name                    String
+  email                   String   @unique
+  password_hash           String
+  role                    Role     @default(STUDENT)
+  cloudinary_api_key      String?  // Optional: For multi-instructor Cloudinary setup
+  cloudinary_api_secret   String?
+  cloudinary_cloud_name   String?
+  created_at              DateTime @default(now())
+  
+  courses                 Course[]     @relation("InstructorCourses")
+  enrollments             Enrollment[]
+  recorded_payments       Payment[]    @relation("AdminPayments")
+}
+
+model Course {
+  id            String       @id @default(uuid())
+  title         String
+  description   String
+  instructor_id String
+  instructor    User         @relation("InstructorCourses", fields: [instructor_id], references: [id])
+  created_at    DateTime     @default(now())
+
+  modules       Module[]
+  enrollments   Enrollment[]
+}
+
+model Module {
+  id          String   @id @default(uuid())
+  course_id   String
+  course      Course   @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  title       String
+  order_index Int
+
+  lessons     Lesson[]
+}
+
+model Lesson {
+  id          String       @id @default(uuid())
+  module_id   String
+  module      Module       @relation(fields: [module_id], references: [id], onDelete: Cascade)
+  title       String
+  video_url   String       // Cloudinary HLS / Bunny stream URL (.m3u8)
+  order_index Int
+  tier        LessonTier   @default(BOTH)
+
+  assessment  Assessment?
+  progress    LessonProgress[]
+}
+
+model Cohort {
+  id               String       @id @default(uuid())
+  name             String
+  start_date       DateTime
+  end_date         DateTime
+  is_active        Boolean      @default(true)
+  discounted_price Decimal      @db.Decimal(10, 2)
+  created_at       DateTime     @default(now())
+
+  enrollments      Enrollment[]
+}
+
+model Enrollment {
+  id                  String           @id @default(uuid())
+  student_id          String
+  student             User             @relation(fields: [student_id], references: [id])
+  course_id           String
+  course              Course           @relation(fields: [course_id], references: [id])
+  cohort_id           String?
+  cohort              Cohort?          @relation(fields: [cohort_id], references: [id])
+  
+  status              EnrollmentStatus @default(ACTIVE)
+  total_agreed_amount Decimal          @db.Decimal(10, 2)
+  access_expires_at   DateTime
+  enrolled_at         DateTime         @default(now())
+
+  payments            Payment[]
+  progress            LessonProgress[]
+  quiz_attempts       QuizAttempt[]
+  certificate         Certificate?
+}
+
+model Payment {
+  id                   String     @id @default(uuid())
+  enrollment_id        String
+  enrollment           Enrollment @relation(fields: [enrollment_id], references: [id])
+  amount_paid          Decimal    @db.Decimal(10, 2)
+  payment_reference    String     @unique
+  recorded_by_admin_id String
+  recorded_by_admin    User       @relation("AdminPayments", fields: [recorded_by_admin_id], references: [id])
+  payment_date         DateTime   @default(now())
+}
+
+model LessonProgress {
+  id            String     @id @default(uuid())
+  enrollment_id String
+  enrollment    Enrollment @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  lesson_id     String
+  lesson        Lesson     @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+  is_completed  Boolean    @default(false)
+  completed_at  DateTime?
+
+  @@unique([enrollment_id, lesson_id])
+}
+
+model Assessment {
+  id            String         @id @default(uuid())
+  lesson_id     String         @unique
+  lesson        Lesson         @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+  passing_score Int            @default(80)
+
+  questions     QuizQuestion[]
+  attempts      QuizAttempt[]
+}
+
+model QuizQuestion {
+  id            String       @id @default(uuid())
+  assessment_id String
+  assessment    Assessment   @relation(fields: [assessment_id], references: [id], onDelete: Cascade)
+  question_text String
+  order_index   Int
+
+  options       QuizOption[]
+}
+
+model QuizOption {
+  id          String       @id @default(uuid())
+  question_id String
+  question    QuizQuestion @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  option_text String
+  is_correct  Boolean      @default(false)
+}
+
+model QuizAttempt {
+  id            String     @id @default(uuid())
+  enrollment_id String
+  enrollment    Enrollment @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  assessment_id String
+  assessment    Assessment @relation(fields: [assessment_id], references: [id], onDelete: Cascade)
+  score         Int
+  passed        Boolean
+  attempted_at  DateTime   @default(now())
+}
+
+model Certificate {
+  id            String     @id @default(uuid())
+  enrollment_id String     @unique
+  enrollment    Enrollment @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  file_url      String
+  uploaded_at   DateTime   @default(now())
+}
